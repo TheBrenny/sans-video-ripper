@@ -1,0 +1,16 @@
+{
+    "name": "sans-video-ripper",
+    "version": "1.0.0",
+    "description": "Rips all the videos from a SANS course and places them in a folder of your choice!",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no tests specified. Maybe you could make one?\""
+    },
+    "keywords": [],
+    "author": "TheBrenny <iam@justbrenny.me>",
+    "license": "MIT",
+    "dependencies": {
+        "puppeteer-core": "^21.5.0",
+        "yargs": "^17.7.2"
+    }
+}
