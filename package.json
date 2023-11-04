@@ -3,9 +3,7 @@
     "version": "1.0.0",
     "description": "Rips all the videos from a SANS course and places them in a folder of your choice!",
     "main": "index.js",
-    "bin": {
-        "sans-video-ripper": "node index.js"
-    },
+    "bin": "index.js",
     "scripts": {
         "test": "echo \"Error: no tests specified. Maybe you could make one?\""
     },
