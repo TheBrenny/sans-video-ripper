@@ -77,7 +77,7 @@ const prompt = require("inquirer").createPromptModule();
     log("Setting up consts");
     const vidExtension = "mp4";
     const host = `https://ondemand-player.sans.org/${courseId}`;
-    const videoHost = (modId, vidId) => `https://olt-content.sans.org/${modId}/video/${(`000${vidId + 1}`.substr(-3))}-720.${vidExtension}`;
+    const videoHost = (modId, vidId) => `https://olt-content.sans.org/${modId}/video/${(vidId + 1).padStart(3, "0")}-720.${vidExtension}`;
     const graphHost = "https://ondemand.sans.org/api/graphql";
     const videoStateEnum = {
         NOT_STARTED: {
@@ -146,6 +146,8 @@ const prompt = require("inquirer").createPromptModule();
 
         await page.type("#username", account.username);
         await page.type("#password", account.password);
+        delete account.username; // don't keep account in cache
+        delete account.password; // don't keep account in cache
         delete account; // don't keep account in cache
 
         log("Submitting");
@@ -305,7 +307,7 @@ async function downloadVideo(url, dest, headers, cookieMap) {
 async function graphQuery(url, modId, headers, vidExtension) {
     const f = await fetch(url, {
         headers,
-        body: `{\"operationName\":\"ModuleQuery\",\"variables\":{\"moduleId\":\"${modId}\",\"quality\":\"HD\",\"mp4\":${vidExtension === "mp4"}},\"query\":\"query ModuleQuery($moduleId: String!, $quality: String!, $mp4: Boolean!) { module(moduleId: $moduleId) { id baseUrl cookies { key value } slides { name id videoPath(quality: $quality, mp4: $mp4) } } } \"}`,
+        body: `{"operationName":"ModuleQuery","variables":{"moduleId":"${modId}","quality":"HD","mp4":${vidExtension === "mp4"}},"query":"query ModuleQuery($moduleId: String!, $quality: String!, $mp4: Boolean!) { module(moduleId: $moduleId) { id baseUrl cookies { key value } slides { name id videoPath(quality: $quality, mp4: $mp4) } } } "}`,
         method: "POST"
     });
 

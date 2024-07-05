@@ -30,15 +30,6 @@ function nullOrUndefined(v) {
     return v === null || v === undefined;
 }
 
-async function filterAsync(array, predicate) {
-    const results = await Promise.all(array.map(predicate));
-    return array.filter((_v, i) => results[i]);
-}
-Object.defineProperty(Array.prototype, "filterAsync", {
-    value(predicate) {return filterAsync(this, predicate);},
-    enumerable: false,
-});
-
 function cookieSplit(cookie) {
     return [cookie.substring(0, cookie.indexOf("=")), cookie.substring(cookie.indexOf("=") + 1)];
 }
