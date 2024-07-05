@@ -158,10 +158,11 @@ const prompt = require("inquirer").createPromptModule();
     await client.send("Network.setBypassServiceWorker", {bypass: true});
     await page.setRequestInterception(true);
     page.on("request", async (req) => {
-        if(req.url().includes("main.c41543fd.js")) {
+        if(/main\..{8}.js/g.test(req.url())) {
+            let realScript = await page.evaluate(async (url) => (await fetch(url)).text(), req.url());
             req.respond({
                 status: 200,
-                body: await fs.readFileSync(path.join(__dirname, "patchedMain.js")),
+                body: await patchMain(realScript),
                 contentType: "text/javascript"
             });
             patchedMain.resolver();
@@ -311,6 +312,21 @@ async function graphQuery(url, modId, headers, vidExtension) {
     if(!f.ok) throw new Error(`fetch returned ${f.status} - ${f.statusText}`);
 
     return await f.json();
+}
+async function patchMain(scriptData) {
+    const regexes = {
+        modules: /if\("CONTENT"\s*!==\s*(\w+)\.type\)\s*return null/gs,
+        sections: /(\w+)\s*?=\s*?.\.sections[;,\s]/gs, // In my sample it terminates on a semicolon, but we want to catch other types of terminators.
+    };
+    const replaces = {
+        modules: "globalThis.sansModules = globalThis.sansModules ?? {}; globalThis.sansModules[$1.id] = $1;$0",
+        sections: "$0;globalThis.sansSections = $1;",
+    };
+
+    scriptData.replace(regexes.modules, replaces.modules);
+    scriptData.replace(regexes.sections, replaces.sections);
+
+    return scriptData;
 }
 
 async function mkdir(dir, options = {recursive: true}) {
