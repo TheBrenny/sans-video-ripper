@@ -13,10 +13,10 @@
     "dependencies": {
         "inquirer": "8.0.0",
         "p-limit": "^5.0.0",
-        "puppeteer-core": "^21.5.0",
+        "puppeteer-core": "^22.12.1",
         "yargs": "^17.7.2"
     },
     "optionalDependencies": {
-        "puppeteer": "^21.5.0"
+        "puppeteer": "^22.12.1"
     }
 }
