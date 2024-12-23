@@ -114,7 +114,7 @@ function getBrowserExecutable(path) {
 
 
 module.exports = {
-    log: (s) => console.log(`${s}...`),
+    log: (s, ellipsis = true) => console.log(`${s}${ellipsis ? "..." : ""}`),
     color,
     write: (value) => process.stdout.write(value),
     writeAt: (x, value) => process.stdout.write(`\x1b[${x}G${value}`),

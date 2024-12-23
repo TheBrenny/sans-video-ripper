@@ -3,8 +3,8 @@
 const yargs = require("yargs");
 const args = [yargs
     .option("course", {
-        describe: "The course ID found in the URL",
-        number: true,
+        describe: "The ID of the course being undertaken (ie, SEC522)",
+        string: true,
         alias: "c"
     })
     .option("account", {
@@ -42,6 +42,12 @@ const args = [yargs
         default: process.cwd(),
         defaultDescription: "$pwd"
     })
+    .option("debug", {
+        describe: "Enable debug logging",
+        boolean: true,
+        alias: "d",
+        default: false
+    })
     .help("help")
     .alias("help", "h")
     .demandOption(["course"])
@@ -65,19 +71,21 @@ const prompt = require("inquirer").createPromptModule();
 
     // Args
     log("Collecting args");
-    const courseId = args.course;
+    const courseID = /\w{3}\d{3}/g.test(args.course) ? args.course : null;
     const output = path.normalize(args.output ?? process.cwd());
     const flatten = args.flatten;
     const concurrency = args.concurrency;
     const headful = args.headful;
     const browserPath = getBrowserExecutable(args.browser);
+    const debugging = args.debug ?? false;
 
+    if(courseID === null) throw new Error("Invalid course ID");
 
     // Final consts
     log("Setting up consts");
     const vidExtension = "mp4";
-    const host = `https://ondemand-player.sans.org/${courseId}`;
-    const videoHost = (modId, vidId) => `https://olt-content.sans.org/${modId}/video/${(vidId + 1).padStart(3, "0")}-720.${vidExtension}`;
+    const host = `https://ondemand.sans.org/`;
+    const videoHost = (modId, vidId) => `https://olt-content.sans.org/${modId}/video/${(vidId + 1 + "").padStart(3, "0")}-720.${vidExtension}`;
     const graphHost = "https://ondemand.sans.org/api/graphql";
     const videoStateEnum = {
         NOT_STARTED: {
@@ -127,9 +135,42 @@ const prompt = require("inquirer").createPromptModule();
         devtools: false,
     });
 
+    // Building page and setting up interceptors
     const page = (await browser.pages())[0];
     page.setDefaultTimeout(120 * 1000);
     page.setCacheEnabled(false);
+    const client = await page.target().createCDPSession();
+    await client.send("Network.enable");
+    await client.send("Network.setBypassServiceWorker", {bypass: true});
+    await page.setRequestInterception(true);
+    page.on("request", async (req) => {
+        if(/main\..{8}.js/g.test(req.url())) {
+            if(req.headers().brenny === "hello") {
+                req.continue();
+                return;
+            }
+
+            if(debugging) log(`    << Patching ${req.url().match(/main\..{8}.js/g)} >>`, false);
+            let realScript = await page.evaluate(async (url) => (await fetch(url, {headers: {brenny: "hello"}})).text(), req.url());
+            let pm = await patchMain(realScript);
+            req.respond({
+                status: 200,
+                body: pm,
+                contentType: "text/javascript"
+            });
+            patchedMain.resolver();
+        } else if(req.url().includes(".webm") && req.headers().cookie?.includes("CloudFront")) {
+            if(debugging) log("    << Collecting video headers >>", false);
+            videoHeaders = req.headers();
+            videoHeadSaved.resolver();
+        } else if(req.url().includes("/api/graphq") && !!req.headers()["x-access-token"]) {
+            if(debugging) log("    << Collecting graph headers >>", false);
+            graphHeaders = req.headers();
+            graphHeadSaved.resolver();
+        }
+        if(!req.isInterceptResolutionHandled()) req.continue();
+    });
+
 
     log(`Going to: ${host}`);
     await page.goto(host, {waitUntil: "networkidle0"});
@@ -150,37 +191,22 @@ const prompt = require("inquirer").createPromptModule();
         delete account.password; // don't keep account in cache
         delete account; // don't keep account in cache
 
-        log("Submitting");
+        log("    Submitting");
         await page.click('[type="submit"]');
+        await page.waitForNavigation({waitUntil: "networkidle0"});
     }
 
-    // Setting up main.js patch
-    const client = await page.target().createCDPSession();
-    await client.send("Network.enable");
-    await client.send("Network.setBypassServiceWorker", {bypass: true});
-    await page.setRequestInterception(true);
-    page.on("request", async (req) => {
-        if(/main\..{8}.js/g.test(req.url())) {
-            let realScript = await page.evaluate(async (url) => (await fetch(url)).text(), req.url());
-            req.respond({
-                status: 200,
-                body: await patchMain(realScript),
-                contentType: "text/javascript"
-            });
-            patchedMain.resolver();
-        } else if(req.url().includes(".webm") && req.headers().cookie.includes("CloudFront")) {
-            videoHeaders = req.headers();
-            videoHeadSaved.resolver();
-        } else if(req.url().includes("/api/graphq") && !!req.headers()["x-access-token"]) {
-            graphHeaders = req.headers();
-            graphHeadSaved.resolver();
-        }
-        if(!req.isInterceptResolutionHandled()) req.continue();
+    // Wait until dashboard
+    log("Arriving at dashboard");
+    await page.waitForFrame((frame) => {
+        return frame.url() === host;
     });
-    log(`Going back to: ${host}`);
-    await page.goto(host, {waitUntil: "networkidle2"}); // we goto again because sans lags heaps
-    await page.waitForSelector("#course_outline");
 
+    // Click to course
+    log("Navigating to course");
+    await page.click(`::-p-text(${courseID})`);
+    await page.waitForSelector("#course_outline");
+    await page.waitForSelector("#course_title .ondemand-course-number__text");
 
     let courseName = ""; // ""
     let sectionNames = []; // [""...]
@@ -190,30 +216,32 @@ const prompt = require("inquirer").createPromptModule();
 
     log("Getting course name");
     courseName = await page.$eval("#course_title .ondemand-course-number__text", e => e.innerText);
+    log(`    ${courseName}`, false);
     if(!flatten) await mkdir(makePath(flatten, output, courseName));
     await patchedMain.promise;
 
-
     log("Collecting sections and modules");
     let sections = await page.evaluate(() => {
-        console.log(globalThis.sansSections);
         return globalThis.sansSections;
     });
-    sections.shift();
+    sections.shift(); // removes "Getting Started  With SANS OnDemand"
     for(let s = 0; s < sections.length; s++) {
         sectionNames[s] = sections[s].name;
         moduleNames[s] = sections[s].modules.map(m => m.name)
         moduleIds[s] = sections[s].modules.map(m => m.id);
         cookieMap[s] = new Array(sections[s].modules.length);
     }
+    log(`    ${sections.length} / ${sections.map(s => s.modules.length).join("-")}`, false);
 
+
+    await videoHeadSaved.promise;
     await graphHeadSaved.promise;
     for(let s = 0; s < sectionNames.length; s++) {
-        log(` Section ${s + 1}`);
+        log(`    Section ${s + 1}`);
         await mkdir(makePath(flatten, output, courseName, [s, sectionNames[s]]));
 
         for(let m = 0; m < moduleNames[s].length; m++) {
-            log(`  Module ${m + 1}`);
+            log(`      Module ${m + 1}`);
             await mkdir(makePath(flatten, output, courseName, [s, sectionNames[s]], [m, moduleNames[s][m]]));
 
             let slides = await graphQuery(graphHost, moduleIds[s][m], graphHeaders, vidExtension);
@@ -222,7 +250,7 @@ const prompt = require("inquirer").createPromptModule();
             let videoNames = slides.data.module.slides.map((s) => s.name);
             let videoStates = new Array(videoNames.length).fill(videoStateEnum.NOT_STARTED);
             let failures = [];
-            write("   " + color(videoStateEnum.NOT_STARTED.color) + videoStates.map(() => videoStateEnum.NOT_STARTED.char).join(""));
+            write("      " + color(videoStateEnum.NOT_STARTED.color) + videoStates.map(() => videoStateEnum.NOT_STARTED.char).join(""));
             moveTo(0);
 
 
@@ -230,7 +258,7 @@ const prompt = require("inquirer").createPromptModule();
             let downloads = (videoNames.map(async (name, v) => limit(async () => {
                 // Download the video I guess...
                 videoStates[v] = videoStateEnum.STARTED;
-                writeAt(v + 4, color(videoStates[v].color) + videoStates[v].char); // + 4 because of the spaces
+                writeAt(v + 7, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
                 moveTo(0);
                 let dest = buildPath(flatten, [output, courseName, sectionNames, moduleNames[s], videoNames], s, m, v) + `.${vidExtension}`;
                 let url = videoHost(moduleIds[s][m], v);
@@ -241,10 +269,10 @@ const prompt = require("inquirer").createPromptModule();
                     if(e === "finished") videoStates[v] = videoStateEnum.FINISHED;
                     else if(e === "skipped") videoStates[v] = videoStateEnum.SKIPPING;
                 } catch(e) {
-                    failures.push([name, e.message]);
+                    failures.push([name, e.message, e.stack]);
                     videoStates[v] = videoStateEnum.FAILED;
                 }
-                writeAt(v + 4, color(videoStates[v].color) + videoStates[v].char); // + 4 because of the spaces
+                writeAt(v + 7, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
                 moveTo(0);
             })));
             await Promise.all(downloads)
@@ -253,7 +281,7 @@ const prompt = require("inquirer").createPromptModule();
 
             write(color("red"));
             for(let failure of failures) {
-                log(`   ${failure.join(": ")}`);
+                log(`      ${failure[0]}: ${failure[1]}\n${!debugging ? "" : failure[2].split("\n").join("\n      ")}`);
             }
             write(color("green"));
             let success = 0;
@@ -264,7 +292,7 @@ const prompt = require("inquirer").createPromptModule();
                 if(state === videoStateEnum.FAILED) failed++;
                 if(state === videoStateEnum.SKIPPING) skipped++;
             }
-            log(`   ${success}/${videoStates.length} successfully downloaded` + (skipped > 0 ? `, ${skipped} skipped` : "") + (failed > 0 ? `, ${failed} failed` : ""))
+            log(`      ${success}/${videoStates.length} successfully downloaded` + (skipped > 0 ? `, ${skipped} skipped` : "") + (failed > 0 ? `, ${failed} failed` : ""), false)
             write(color("reset"));
         }
     }
@@ -272,6 +300,7 @@ const prompt = require("inquirer").createPromptModule();
     console.log("Done!");
     await browser.close();
 })();
+
 async function downloadVideo(url, dest, headers, cookieMap) {
     const abortController = new AbortController();
     const abortSignal = abortController.signal;
@@ -317,16 +346,16 @@ async function graphQuery(url, modId, headers, vidExtension) {
 }
 async function patchMain(scriptData) {
     const regexes = {
-        modules: /if\("CONTENT"\s*!==\s*(\w+)\.type\)\s*return null/gs,
-        sections: /(\w+)\s*?=\s*?.\.sections[;,\s]/gs, // In my sample it terminates on a semicolon, but we want to catch other types of terminators.
+        modules: /var (\w+?)\s*=\s*\w+?\(\),((?!var).)*?\1\.module,((?!var).)*?"No module selected\.".*?;/gs,
+        sections: /((\w+\.sections)\);)(((?!sections).)*"course_outline")/gs,
     };
     const replaces = {
-        modules: "globalThis.sansModules = globalThis.sansModules ?? {}; globalThis.sansModules[$1.id] = $1;$0",
-        sections: "$0;globalThis.sansSections = $1;",
+        modules: (match, e) => `${match};globalThis.sansModules = globalThis.sansModules ?? {}; globalThis.sansModules[${e}.id] = ${e};`,
+        sections: (_match, pre, e, post) => `${pre};globalThis.sansSections=${e};${post}`,
     };
 
-    scriptData.replace(regexes.modules, replaces.modules);
-    scriptData.replace(regexes.sections, replaces.sections);
+    scriptData = scriptData.replace(regexes.modules, replaces.modules);
+    scriptData = scriptData.replace(regexes.sections, replaces.sections);
 
     return scriptData;
 }
@@ -340,7 +369,7 @@ async function mkdir(dir, options = {recursive: true}) {
 }
 /** @type {Map<{secId, modId, vidId}, String>} */
 const pathMems = new Map();
-const illegalPathChars = /[\\\/\<\>:"\|\?\*\x00-\x1F]/gi;
+const illegalPathChars = /[\\/<>:"|?*\x00-\x1F]/gi;
 function makePath(flatten, output, courseName, [secId, section] = [null, null], [modId, module] = [null, null], [vidId, video] = [null, null]) {
     const pathMemKey = {secId, modId, vidId};
     if(pathMems.has(pathMemKey)) return pathMems.get(pathMemKey);

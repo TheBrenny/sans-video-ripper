@@ -3,6 +3,7 @@
 
 
 ## Quick Install
+
 ❗❗❗
 ```bash
 # Got Chrome, Edge, or Firefox?
@@ -47,4 +48,5 @@ Because of this, the preferred way of installing is by ommitting the optional de
 Otherwise, if you don't have a Chromium or Firefox browser or don't care for the download, feel free to straight up install.
 
 ## Licencing
+
 See [./LICENCE.md]
