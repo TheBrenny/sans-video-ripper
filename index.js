@@ -55,7 +55,7 @@ const args = [yargs
     .argv][0]; // wrap in array to collapse in the IDE
 
 // Setup
-const {log, nullOrUndefined, cookieSplit, getBrowserExecutable, tryRequire} = require("./util");
+const {log, nullOrUndefined, cookieSplit, getBrowserExecutable, tryRequire, INDENT} = require("./util");
 log("Setting up requires");
 const {write, writeAt, color, moveTo} = require("./util");
 const path = require("path");
@@ -150,7 +150,7 @@ const prompt = require("inquirer").createPromptModule();
                 return;
             }
 
-            if(debugging) log(`    << Patching ${req.url().match(/main\..{8}.js/g)} >>`, false);
+            if(debugging) log(1, `<< Patching ${req.url().match(/main\..{8}.js/g)} >>`, false);
             let realScript = await page.evaluate(async (url) => (await fetch(url, {headers: {brenny: "hello"}})).text(), req.url());
             let pm = await patchMain(realScript);
             req.respond({
@@ -160,11 +160,11 @@ const prompt = require("inquirer").createPromptModule();
             });
             patchedMain.resolver();
         } else if(req.url().includes(".webm") && req.headers().cookie?.includes("CloudFront")) {
-            if(debugging) log("    << Collecting video headers >>", false);
+            if(debugging) log(1, "<< Collecting video headers >>", false);
             videoHeaders = req.headers();
             videoHeadSaved.resolver();
         } else if(req.url().includes("/api/graphq") && !!req.headers()["x-access-token"]) {
-            if(debugging) log("    << Collecting graph headers >>", false);
+            if(debugging) log(1, "<< Collecting graph headers >>", false);
             graphHeaders = req.headers();
             graphHeadSaved.resolver();
         }
@@ -191,7 +191,7 @@ const prompt = require("inquirer").createPromptModule();
         delete account.password; // don't keep account in cache
         delete account; // don't keep account in cache
 
-        log("    Submitting");
+        log(1, "Submitting");
         await page.click('[type="submit"]');
         await page.waitForNavigation({waitUntil: "networkidle0"});
     }
@@ -216,7 +216,7 @@ const prompt = require("inquirer").createPromptModule();
 
     log("Getting course name");
     courseName = await page.$eval("#course_title .ondemand-course-number__text", e => e.innerText);
-    log(`    ${courseName}`, false);
+    log(1, courseName, false);
     if(!flatten) await mkdir(makePath(flatten, output, courseName));
     await patchedMain.promise;
 
@@ -231,17 +231,17 @@ const prompt = require("inquirer").createPromptModule();
         moduleIds[s] = sections[s].modules.map(m => m.id);
         cookieMap[s] = new Array(sections[s].modules.length);
     }
-    log(`    ${sections.length} / ${sections.map(s => s.modules.length).join("-")}`, false);
+    log(1, `${sections.length} / ${sections.map(s => s.modules.length).join("-")}`, false);
 
 
     await videoHeadSaved.promise;
     await graphHeadSaved.promise;
     for(let s = 0; s < sectionNames.length; s++) {
-        log(`    Section ${s + 1}`);
+        log(1, `Section ${s + 1}`);
         await mkdir(makePath(flatten, output, courseName, [s, sectionNames[s]]));
 
         for(let m = 0; m < moduleNames[s].length; m++) {
-            log(`      Module ${m + 1}`);
+            log(2, `Module ${m + 1}`);
             await mkdir(makePath(flatten, output, courseName, [s, sectionNames[s]], [m, moduleNames[s][m]]));
 
             let slides = await graphQuery(graphHost, moduleIds[s][m], graphHeaders, vidExtension);
@@ -250,7 +250,7 @@ const prompt = require("inquirer").createPromptModule();
             let videoNames = slides.data.module.slides.map((s) => s.name);
             let videoStates = new Array(videoNames.length).fill(videoStateEnum.NOT_STARTED);
             let failures = [];
-            write("      " + color(videoStateEnum.NOT_STARTED.color) + videoStates.map(() => videoStateEnum.NOT_STARTED.char).join(""));
+            write(INDENT.repeat(2) + color(videoStateEnum.NOT_STARTED.color) + videoStates.map(() => videoStateEnum.NOT_STARTED.char).join(""));
             moveTo(0);
 
 
@@ -258,7 +258,8 @@ const prompt = require("inquirer").createPromptModule();
             let downloads = (videoNames.map(async (name, v) => limit(async () => {
                 // Download the video I guess...
                 videoStates[v] = videoStateEnum.STARTED;
-                writeAt(v + 7, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
+                let pos = v + 1 + (INDENT.length * 2);
+                writeAt(pos, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
                 moveTo(0);
                 let dest = buildPath(flatten, [output, courseName, sectionNames, moduleNames[s], videoNames], s, m, v) + `.${vidExtension}`;
                 let url = videoHost(moduleIds[s][m], v);
@@ -272,7 +273,7 @@ const prompt = require("inquirer").createPromptModule();
                     failures.push([name, e.message, e.stack]);
                     videoStates[v] = videoStateEnum.FAILED;
                 }
-                writeAt(v + 7, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
+                writeAt(pos, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
                 moveTo(0);
             })));
             await Promise.all(downloads)
@@ -280,8 +281,9 @@ const prompt = require("inquirer").createPromptModule();
 
 
             write(color("red"));
+            let i = INDENT.repeat(3);
             for(let failure of failures) {
-                log(`      ${failure[0]}: ${failure[1]}\n${!debugging ? "" : failure[2].split("\n").join("\n      ")}`);
+                log(3, `${failure[0]}: ${failure[1]}\n${!debugging ? "" : failure[2].split("\n").join("\n" + i)}`, false);
             }
             write(color("green"));
             let success = 0;
@@ -292,12 +294,12 @@ const prompt = require("inquirer").createPromptModule();
                 if(state === videoStateEnum.FAILED) failed++;
                 if(state === videoStateEnum.SKIPPING) skipped++;
             }
-            log(`      ${success}/${videoStates.length} successfully downloaded` + (skipped > 0 ? `, ${skipped} skipped` : "") + (failed > 0 ? `, ${failed} failed` : ""), false)
+            log(2, `${success}/${videoStates.length} successfully downloaded` + (skipped > 0 ? `, ${skipped} skipped` : "") + (failed > 0 ? `, ${failed} failed` : ""), false)
             write(color("reset"));
         }
     }
 
-    console.log("Done!");
+    log(0, "Done!", false);
     await browser.close();
 })();
 

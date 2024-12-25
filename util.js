@@ -112,9 +112,19 @@ function getBrowserExecutable(path) {
     throw new Error("No Chromium/Firefox executable was found. Please specify using the --browser argument.");
 }
 
+const indent = "  ";
 
 module.exports = {
-    log: (s, ellipsis = true) => console.log(`${s}${ellipsis ? "..." : ""}`),
+    INDENT: indent,
+    log: (indentCount, s, ellipsis = true) => {
+        if(typeof indentCount === "string") {
+            ellipsis = s ?? true;
+            s = indentCount;
+            indentCount = 0;
+        }
+        s = indent.repeat(indentCount) + s;
+        return console.log(`${s}${ellipsis ? "..." : ""}`)
+    },
     color,
     write: (value) => process.stdout.write(value),
     writeAt: (x, value) => process.stdout.write(`\x1b[${x}G${value}`),
