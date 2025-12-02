@@ -26,6 +26,8 @@ Options:
   -H, --headful      Show the Chromium browser that's making calls (to verify you're a human, for example)
                                                                                               [boolean] [default: false]
   -o, --output       The output folder to download the videos to                                [string] [default: $pwd]
+  -d, --debug        Enable debug logging                                                     [boolean] [default: false]
+  -s, --sub          Enable sub download                                                      [boolean] [default: false]
   -h, --help         Show help                                                                                 [boolean]
 ```
 

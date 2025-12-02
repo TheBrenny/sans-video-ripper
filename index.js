@@ -48,6 +48,12 @@ const args = [yargs
         alias: "d",
         default: false
     })
+    .option("sub", {
+        describe: "Enable sub download",
+        boolean: true,
+        alias: "s",
+        default: false
+    })
     .help("help")
     .alias("help", "h")
     .demandOption(["course"])
@@ -78,14 +84,17 @@ const prompt = require("inquirer").createPromptModule();
     const headful = args.headful;
     const browserPath = getBrowserExecutable(args.browser);
     const debugging = args.debug ?? false;
+    const subdownload = args.sub ?? false;
 
     if(courseID === null) throw new Error("Invalid course ID");
 
     // Final consts
     log("Setting up consts");
     const vidExtension = "mp4";
+    const subExtension = "vtt";
     const host = `https://ondemand.sans.org/`;
     const videoHost = (modId, vidId) => `https://olt-content.sans.org/${modId}/video/${(vidId + 1 + "").padStart(3, "0")}-720.${vidExtension}`;
+    const subHost = (modId, vidId) => `https://olt-content.sans.org/${modId}/video/${(vidId + 1 + "").padStart(3, "0")}.${subExtension}`;
     const graphHost = "https://ondemand.sans.org/api/graphql";
     const videoStateEnum = {
         NOT_STARTED: {
@@ -262,8 +271,18 @@ const prompt = require("inquirer").createPromptModule();
                 writeAt(pos, color(videoStates[v].color) + videoStates[v].char); // + 7 because of the spaces
                 moveTo(0);
                 let dest = buildPath(flatten, [output, courseName, sectionNames, moduleNames[s], videoNames], s, m, v) + `.${vidExtension}`;
+                let subdest = buildPath(flatten, [output, courseName, sectionNames, moduleNames[s], videoNames], s, m, v) + `.${subExtension}`;
                 let url = videoHost(moduleIds[s][m], v);
+                let suburl = subHost(moduleIds[s][m], v);
 
+                if(subdownload) {
+                     try {
+                         await downloadVideo(suburl, subdest, videoHeaders, cookieMap[s][m]);
+                     } catch (err) {
+                         log(`[ERROR] Failed to download subtitles for ${videoNames}: ${err.message || err}`);
+                     }
+                 }
+                
                 try {
                     let e = await downloadVideo(url, dest, videoHeaders, cookieMap[s][m]).catch(e => e);
                     if(e instanceof Error) throw e;
