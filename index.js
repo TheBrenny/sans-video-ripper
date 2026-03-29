@@ -144,13 +144,14 @@ const prompt = require("inquirer").createPromptModule();
     await client.send("Network.setBypassServiceWorker", {bypass: true});
     await page.setRequestInterception(true);
     page.on("request", async (req) => {
-        if(/main\..{8}.js/g.test(req.url())) {
+        if(debugging && req.url().includes(".js") && !req.url().includes("node_modules")) log(1, `[JS] ${req.url()}`, false);
+        if(/main[-\.][a-z0-9_]+\.js/gi.test(req.url())) {
             if(req.headers().brenny === "hello") {
                 req.continue();
                 return;
             }
 
-            if(debugging) log(1, `<< Patching ${req.url().match(/main\..{8}.js/g)} >>`, false);
+            if(debugging) log(1, `<< Patching ${req.url().match(/main[-\.][a-z0-9_]+\.js/gi)} >>`, false);
             let realScript = await page.evaluate(async (url) => (await fetch(url, {headers: {brenny: "hello"}})).text(), req.url());
             let pm = await patchMain(realScript);
             req.respond({
@@ -169,6 +170,22 @@ const prompt = require("inquirer").createPromptModule();
             graphHeadSaved.resolver();
         }
         if(!req.isInterceptResolutionHandled()) req.continue();
+    });
+
+    let patchedMainResolved = false;
+    page.on('response', async (res) => {
+        if(patchedMainResolved) return;
+        if(!res.url().includes('/api/graphql')) return;
+        try {
+            const json = await res.json();
+            const sections = json?.data?.course?.sections;
+            if(sections?.length > 0 && sections[0]?.modules !== undefined) {
+                if(debugging) log(1, `<< Found sections in GraphQL response (${sections.length} sections) >>`, false);
+                await page.evaluate((s) => { globalThis.sansSections = s; }, sections);
+                patchedMainResolved = true;
+                patchedMain.resolver();
+            }
+        } catch(e) {}
     });
 
 
@@ -204,6 +221,7 @@ const prompt = require("inquirer").createPromptModule();
 
     // Click to course
     log("Navigating to course");
+    await page.waitForSelector(`::-p-text(${courseID})`);
     await page.click(`::-p-text(${courseID})`);
     await page.waitForSelector("#course_outline");
     await page.waitForSelector("#course_title .ondemand-course-number__text");
