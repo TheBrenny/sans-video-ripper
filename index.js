@@ -262,7 +262,13 @@ const prompt = require("inquirer").createPromptModule();
             log(2, `Module ${m + 1}`);
             await mkdir(makePath(flatten, output, courseName, [s, sectionNames[s]], [m, moduleNames[s][m]]));
 
+            await new Promise(r => setTimeout(r, 500));
             let slides = await graphQuery(graphHost, moduleIds[s][m], graphHeaders, vidExtension);
+
+            if(!slides.data?.module) {
+                log(3, `No videos (skipping) - response: ${JSON.stringify(slides).slice(0, 200)}`, false);
+                continue;
+            }
 
             cookieMap[s][m] = Object.fromEntries(slides.data.module.cookies.map((e) => [e.key, e.value]));
             let videoNames = slides.data.module.slides.map((s) => s.name);
@@ -283,6 +289,12 @@ const prompt = require("inquirer").createPromptModule();
                 let url = videoHost(moduleIds[s][m], v);
 
                 try {
+                    if(fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+                        videoStates[v] = videoStateEnum.SKIPPING;
+                        writeAt(pos, color(videoStates[v].color) + videoStates[v].char);
+                        moveTo(0);
+                        return;
+                    }
                     let e = await downloadVideo(url, dest, videoHeaders, cookieMap[s][m]).catch(e => e);
                     if(e instanceof Error) throw e;
                     if(e === "finished") videoStates[v] = videoStateEnum.FINISHED;
