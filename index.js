@@ -263,7 +263,15 @@ const prompt = require("inquirer").createPromptModule();
             await mkdir(makePath(flatten, output, courseName, [s, sectionNames[s]], [m, moduleNames[s][m]]));
 
             await new Promise(r => setTimeout(r, 500));
-            let slides = await graphQuery(graphHost, moduleIds[s][m], graphHeaders, vidExtension);
+            let slides;
+            for(let attempt = 1; attempt <= 5; attempt++) {
+                slides = await graphQuery(graphHost, moduleIds[s][m], graphHeaders, vidExtension);
+                if(slides.data?.module !== undefined) break;
+                if(slides.errors) {
+                    log(3, `Attempt ${attempt}/5 failed: ${slides.errors[0]?.message} - retrying in ${attempt * 2}s...`, false);
+                    await new Promise(r => setTimeout(r, attempt * 2000));
+                } else break;
+            }
 
             if(!slides.data?.module) {
                 log(3, `No videos (skipping) - response: ${JSON.stringify(slides).slice(0, 200)}`, false);
